@@ -277,7 +277,7 @@ class RemoveBreadcrumb2Bot(SingleSiteBot, FollowRedirectPageBot, ExistingPageBot
     # ── التصفية ─────────────────────────────────────────────
 
     def skip_page(self, page: pywikibot.Page) -> bool:
-        """تخطي الصفحات خارج النطاق الرئيسي وصفحات التحويل."""
+        """تخطي الصفحات خارج النطاق الرئيسي وصفحات التحويل وصفحات nobots."""
         if page.namespace().id != 0:
             logger.debug("تخطي (خارج النطاق الرئيسي): %s", page.title())
             self._count_skipped += 1
@@ -285,6 +285,12 @@ class RemoveBreadcrumb2Bot(SingleSiteBot, FollowRedirectPageBot, ExistingPageBot
 
         if page.isRedirectPage():
             logger.debug("تخطي (صفحة تحويل): %s", page.title())
+            self._count_skipped += 1
+            return True
+
+        # التحقق من قوالب {{nobots}} و{{bots}} قبل قراءة المحتوى
+        if not pywikibot.bot.is_bot_allowed(page, username=self.site.user()):
+            logger.info("تخطي (nobots/bots): %s", page.title())
             self._count_skipped += 1
             return True
 
