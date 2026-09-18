@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-بوت لإزالة قالب:Breadcrumb2 (المعروف أيضًا باسم "ممر تصفح") وكل تحويلاته
-(مثل {{ممر}}) من صفحات النطاق الرئيسي (المقالات)، بما في ذلك الاستدعاءات
-التي تحتوي على معلمات، مثل: {{ممر|كونان1|كونان2}}
+بوت لإزالة قالب:ممر تصفح وكل تحويلاته (مثل {{ممر}})
+من صفحات النطاق الرئيسي (المقالات)، بما في ذلك الاستدعاءات التي تحتوي
+على معلمات، مثل: {{ممر|كونان1|كونان2}}
 
-المصدر: قالب:Breadcrumb2
-https://ar.wikipedia.org/wiki/قالب:Breadcrumb2
+المصدر: قالب:ممر تصفح
+https://ar.wikipedia.org/wiki/قالب:ممر_تصفح
 
 الحجج المدعومة:
 
@@ -39,7 +39,8 @@ docuReplacements = {"&params;": parameterHelp}  # noqa: N816
 # ============================================================
 
 # أسماء القوالب الأولية (سيتتبع البوت كل تحويلاتها تلقائياً)
-SEED_TEMPLATE_NAMES: list[str] = ['ممر تصفح', 'Breadcrumb2', 'ممر']
+# "ممر تصفح" هو الاسم الرئيسي للقالب
+SEED_TEMPLATE_NAMES: list[str] = ['ممر تصفح', 'ممر']
 
 # التأخير الافتراضي بين التعديلات بالثواني
 DEFAULT_DELAY_SECONDS: int = 5
@@ -217,7 +218,7 @@ def remove_templates(
 
 
 class RemoveBreadcrumb2Bot(SingleSiteBot, FollowRedirectPageBot, ExistingPageBot):
-    """بوت لإزالة قالب Breadcrumb2 وكل تحويلاته من المقالات."""
+    """بوت لإزالة قالب ممر تصفح وكل تحويلاته من المقالات."""
 
     update_options = {
         "always": False,
@@ -227,12 +228,18 @@ class RemoveBreadcrumb2Bot(SingleSiteBot, FollowRedirectPageBot, ExistingPageBot
         "checkinterval": DEFAULT_CHECK_INTERVAL,
     }
 
-    def __init__(self, **kwargs: Any) -> None:
-        """تهيئة البوت وجلب شبكة القوالب."""
+    def __init__(
+        self,
+        template_group: dict[str, pywikibot.Page] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """تهيئة البوت وجلب شبكة القوالب (أو استخدام واحدة جاهزة إن أُعطيت)."""
         super().__init__(**kwargs)
 
-        # بناء شبكة القوالب وتحويلاتها
-        self._template_group = resolve_template_group(self.site, SEED_TEMPLATE_NAMES)
+        # بناء شبكة القوالب وتحويلاتها، أو إعادة استخدام واحدة محسوبة مسبقًا
+        self._template_group = template_group or resolve_template_group(
+            self.site, SEED_TEMPLATE_NAMES
+        )
         self._all_names: set[str] = set(self._template_group.keys())
 
         display_names = [
@@ -281,20 +288,24 @@ class RemoveBreadcrumb2Bot(SingleSiteBot, FollowRedirectPageBot, ExistingPageBot
             self._count_skipped += 1
             return True
 
-        # التحقق من حد الصفحات
+        # التحقق من حد الصفحات — التوقف الفوري دون معالجة صفحة زائدة
         if self.opt.limit is not None and self._count_processed >= self.opt.limit:
             logger.info("بلغ الحد المحدد (%d صفحة)، إيقاف.", self.opt.limit)
             self.quit()
+            return True
 
         return super().skip_page(page)
 
     # ── صفحة التوقف ─────────────────────────────────────────
 
-    def check_disabled(self) -> None:
-        """التحقق من صفحة التوقف كل N صفحة."""
+    def check_disabled(self) -> bool:
+        """
+        يتحقق من صفحة التوقف كل N صفحة.
+        يعيد True إذا وجب إيقاف المعالجة فورًا (صفحة التوقف مفعّلة).
+        """
         self._pages_since_check += 1
         if self._pages_since_check < self.opt.checkinterval:
-            return
+            return False
         self._pages_since_check = 0
 
         # إعادة تسجيل الدخول عند انتهاء الجلسة فقط
@@ -313,12 +324,16 @@ class RemoveBreadcrumb2Bot(SingleSiteBot, FollowRedirectPageBot, ExistingPageBot
                 logger.error(msg)
                 pywikibot.error(msg)
                 self.quit()
+                return True
+
+        return False
 
     # ── معالجة الصفحة ────────────────────────────────────────
 
     def treat_page(self) -> None:
         """معالجة صفحة واحدة."""
-        self.check_disabled()
+        if self.check_disabled():
+            return  # صفحة التوقف مفعّلة: لا تعالج هذه الصفحة ولا ما بعدها
 
         page = self.current_page
         page_title = page.title()
@@ -342,7 +357,7 @@ class RemoveBreadcrumb2Bot(SingleSiteBot, FollowRedirectPageBot, ExistingPageBot
             return
 
         try:
-            summary = 'بوت: إزالة {{Breadcrumb2}} (ممر تصفح) وتحويلاته'
+            summary = 'بوت: إزالة {{ممر تصفح}} وتحويلاته'
             self.put_current(new_text, summary=summary, minor=False)
             logger.info("✔ تم حفظ: %s", page_title)
         except Exception:
@@ -386,10 +401,12 @@ def main(*args: str) -> int:
         else:
             options[opt] = True
 
+    # نحسب شبكة القوالب مرة واحدة فقط هنا، ونمررها للبوت لاحقًا لتفادي إعادة حسابها
+    template_group = resolve_template_group(site, SEED_TEMPLATE_NAMES)
+
     # إذا لم يُحدَّد مولّد، نجلب الصفحات من مراجع القوالب تلقائياً
     gen = gen_factory.getCombinedGenerator(preload=True)
     if gen is None:
-        template_group = resolve_template_group(site, SEED_TEMPLATE_NAMES)
         seen: set[str] = set()
         pages = []
         for tmpl in template_group.values():
@@ -410,7 +427,9 @@ def main(*args: str) -> int:
     logger.info("بدء تشغيل RemoveBreadcrumb2Bot — %s", datetime.now(tz=timezone.utc))
     logger.info("=" * 50)
 
-    RemoveBreadcrumb2Bot(generator=gen, site=site, **options).run()
+    RemoveBreadcrumb2Bot(
+        generator=gen, site=site, template_group=template_group, **options
+    ).run()
     return 0
 
 
